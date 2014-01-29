@@ -2,7 +2,9 @@
 # API for service discovery
 #
 # * this line contains the protocol, host, ip, name, lifetime, url
-# ServiceDiscovery.find :smt, :url => 'https://smt.suse.com/connect', :machine=>'bla', :scope => 'any'
+# ServiceDiscovery.find 'smt:http', :url => 'https://smt.suse.com/connect', :machine=>'bla', :scope => 'any'
+# ServiceDiscovery.find 'install.suse', :protocol => 'ftp'
+# ServiceDiscovery.find 'service:install.suse:http'
 #
 # Rules:
 # * if there is only the name of the service provided, return a collection of services
@@ -23,25 +25,18 @@ module Yast
 
   module ServiceDiscovery
     class << self
-      def find service_name, options={}
-        find_slp_services(service_name, options[:scope]).find do |service|
-          service = Service.new(options.merge(:name => service_name))
-          service.match?(slp_service) ? service : nil
-        end
+      def find service_name, params={}
+        SlpService.find(service_name, params)
       end
 
-      def find_all service_name, options={}
-        find_slp_services(service_name, options[:scope]).map do |slp_service|
-          service = Service.new(options.merge(:name => service_name))
-          service.match?(slp_service) ? service : nil
-        end
+      def find_all service_name, params={}
+        SlpService.all(service_name, params)
+      # find_slp_service(service_name, options[:scope]).map do |slp_service|
+      #   service = SlpService.new(options.merge(:name => service_name))
+      #   service.match?(slp_service) ? service : nil
+      # end
       end
 
-      private
-
-      def find_slp_services service_name, scope=''
-        SLP.FindSrvs(service_name, scope)
-      end
     end
 
     # Prefix/URL scheme: service: [optional]
@@ -51,34 +46,74 @@ module Yast
     # Prefix + Service name + Protocol => Service Type
     # Attributes: attr1=>something, attr2=>something
 
-    class Service
-      SCHEME = 'service:'
+    class SlpService
+      SCHEME = 'service'
+      BASE_ATTRIBUTES = [ :name, :ip, :host, :protocol, :lifetime, :type ]
 
-      attr_reader :ip, :host, :lifetime, :name, :protocol, :attributes
-
-      def self.discover options
-
+      def self.find service_name, params
+        find_slp_service(service_name, params[:scope]).find do |slp_response|
+          service = new(service_name, slp_response)
+          service.verify!(params)
+        end
       end
 
-      def initialize properties
-        @ip = properties['ip']
+      def self.all service_name, params
+        slp_service_name = service_name
+        slp_service_name << ":#{params[:protocol]}" if params[:protocol]
+        find_slp_service(slp_service_name, params[:scope]).map do |slp_response|
+          service = create(service_name, slp_response, params)
+        end.compact
+      end
+
+      def self.create
+        # Return nil if params (which are expectations) do not meet the
+        # slp response. Otherwise return the new service
+      end
+
+      private
+
+      def self.parse_url url
+        url_parts = url.split(':')
+        url_parts.first == SCHEME ? url_parts : url_parts.unshift(SCHEME.dup)
+      end
+
+      def self.discover_slp_service service_name, scope=''
+        SLP.FindSrvs(service_name, scope)
+      end
+
+      attr_reader *BASE_ATTRIBUTES
+
+      def initialize service_name, slp_data, params
+        @name = service_name
+        @ip = slp_data['ip']
         @host = resolve_host
-        @lifetime = properties['lifetime']
-        @name = properties['pcSrvType'].split(NAME_PREFIX).last
-        @protocol = nil # pcSrvType? no
+        @lifetime = slp_data['lifetime']
+        @protocol = params[:protocol]
         @url = NAME_PREFIX + name + protocol
         @attributes = get_attributes
+      end
+
+      def verify! params
       end
 
       private
 
       def resolve_host
-        hostname = DnsCache.find(ip)
-        return hostname if hostname
+        host = DnsCache.find(ip)
+        return host if host
 
-        hostname = Resolv.getname(ip)
-        DnsCache.update(ip => hostname)
-        hostname
+        host = Resolv.getname(ip)
+        DnsCache.update(ip => host)
+        host
+      end
+
+      def query_attributes
+        attributes = {}
+        SLP.UnicastFindSrvs(url, ip).each do |attribute|
+          attr_name, value = attribute.scan(/\A\((.+)\)/).flatten.first.split('=')
+          attributes[attr_name] = value
+        end
+        attributes
       end
     end
 
