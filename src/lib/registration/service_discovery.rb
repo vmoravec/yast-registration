@@ -29,7 +29,7 @@ require 'ostruct'
 
 module Yast
   Yast.import 'SLP'
-
+# TODO get rid of this module and pass the responsibility onto SlpService
   module ServiceDiscovery
 
     def self.find service_name, params={}
@@ -52,6 +52,7 @@ module Yast
       class << self
         def find service_name, params
           service = nil
+          # TODO remove __slp__ adjectives from var names, it's not needed
           slp_service_type = [SCHEME, service_name, params[:protocol]].compact.join(DELIMITER)
           discover_slp_service(slp_service_type, params[:scope]).each do |slp_response|
             service = new(service_name, slp_response, params)
@@ -111,6 +112,7 @@ module Yast
         @name = service_name
         @ip = slp_data['ip']
         @port = slp_data['pcPort']
+        # TODO no need for __slp__ here, if it's needed due to attributes use an alias
         @slp_type = slp_data['pcSrvType']
         @lifetime = slp_data['lifetime']
         @url = slp_data['srvurl']
@@ -118,7 +120,7 @@ module Yast
         @host = resolve_host
         @attributes = OpenStruct.new(SLP.GetUnicastAttrMap(url, ip))
       end
-
+      # TODO rename to match, we do no change on the object itself
       def match! params
         matches = []
         params.each do |key, value|
@@ -146,9 +148,6 @@ module Yast
         host
       end
 
-      def query_attributes
-        SLP.GetUnicastAttrMap(url,ip)
-      end
     end
 
     module DnsCache
